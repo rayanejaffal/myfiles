@@ -1,0 +1,107 @@
+library(ggplot2)
+library(MASS)
+library(gridExtra)
+
+## Define the moving average function
+moving_average_2 <- function(theta1, theta2, n_obs=100) {
+  lambda <- rnorm(n_obs + 2)
+  y <- lambda[3:(n_obs+2)] + theta1*lambda[2:(n_obs+1)] + theta2*lambda[1:n_obs]
+  return(y)
+}
+
+
+#les vraies thetas
+θ1_true <- 0.6
+θ2_true <- 0.2
+
+#data observés 
+y_obs <- moving_average_2(θ1_true, θ2_true)
+
+#simulation de theta 
+#loi a priori 
+#the uniform distribution over the corresponding range of θi
+#for q = 2: −2 < θ1 < 2, θ1 + θ2 > −1, θ1 − θ2 < 1.
+grid <- function() {
+  while (TRUE) {
+    # Generate random points from a larger rectangle
+    theta1 <- runif(1, min = -2, max = 2)
+    theta2 <- runif(1, min = -1, max = 1)
+    
+    # Check if the point falls within the triangle conditions
+    if (theta1 + theta2 > -1 && theta1 - theta2 < 1 && theta1 > -2 && theta1 < 2) {
+      return(c(theta1, theta2))
+    }
+  }
+}
+
+
+# definir la ft distance pour calculer celle entre les autocovariances 
+#on va l'utiliser aussi pour fixer la tol comme quantile
+
+distance <- function(y, z){
+  return(sum((y - z)^2))}
+
+autocov <- function(x, q = 2) { #q = max_lag
+
+  # Get the length of the series
+  n <- length(x)
+
+  # Initialize autocovariance vector
+  tau <- rep(NA, q + 1)  # Pre-allocate space for efficiency
+  
+  # Calculate autocovariance for lags 0 to q
+  for (lag in 0:q) {
+    if (lag == 0) {
+      # Autocovariance at lag 0 is the variance
+      tau[lag + 1] <- var(x)
+    } else {
+      # Calculate for other lags
+      tau[lag + 1] <- sum((x[1:(n - lag)] - mean(x)) * (x[(lag + 1):n] - mean(x))) / (n - lag)
+    }
+  }
+  
+  # Return autocovariance vector
+  return(tau)
+}
+
+
+#ABC algorithm
+#simulating the MA(q) coefficients θ uniformly over the acceptable range,
+#generating an iid sequence (uk)−q<k≤n,
+#producing a simulated series (zk)1≤k≤n.
+
+ABC <- function(N, tol) {
+  theta_values <- matrix(nrow = N, ncol = 3)  # Store sampled theta values
+  i = 1
+  for (i in 1:N) {
+    #génération des thetas
+    thetas_sim <- grid()
+    #simulation des points
+    z_sim <- moving_average_2(thetas_sim[1], thetas_sim[2])
+    #calcul de la distance  
+    d <- distance(autocov(y_obs), autocov(z_sim))
+    theta_values[i, ] <- c(thetas_sim[1],thetas_sim[2],d)
+    i <- i+1
+  }
+  
+  sorted_thetas<-theta_values[order(theta_values[,3],decreasing=FALSE),]
+  
+  return(sorted_thetas[1:N*tol,1:2])
+}
+
+# Run ABC algorithm
+sampled_thetas <- ABC(10**(6), 0.001) #tol =0.1%, N=10^4
+#sampled_thetas
+
+
+# Convert sampled_thetas matrix to data frame
+sampled_thetas_df <- as.data.frame(sampled_thetas)
+colnames(sampled_thetas_df) <- c("x", "y")  # Naming columns
+
+# Plot joint probability distribution contour
+ggplot() +
+  geom_polygon(data = data.frame(u = c(-2, 0, 2), v = c(1, -1, 1)), aes(x = u, y = v), fill = "bisque1", color = "bisque1") +
+  labs(x = "Theta1", y = "Theta2") +
+  geom_point(data = sampled_thetas_df, aes(x = x, y = y), color = "deepskyblue3", shape = 19) +
+  geom_point(data = data.frame(x = θ1_true, y = θ2_true), aes(x = x, y = y), color = "red", shape = 19) +
+  theme_minimal()
